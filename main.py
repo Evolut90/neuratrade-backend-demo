@@ -1,9 +1,15 @@
 from fastapi import FastAPI
 import uvicorn
 from app.core.config import settings
+from api.routes.market import router as market_router
 
 
-app = FastAPI()
+app = FastAPI(title=settings.api_title,
+    version=settings.api_version,
+    description="Sistema de trading automatizado com IA",
+    debug=settings.debug) 
+    
+app.include_router(market_router)
 
 @app.get("/")
 async def read_root():
