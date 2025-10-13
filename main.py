@@ -2,6 +2,8 @@ from fastapi import FastAPI
 import uvicorn
 from app.core.config import settings
 from api.routes.market import router as market_router
+from api.routes.strategies import router as strategies_router
+from api.routes.trading import router as trading_router
 
 
 app = FastAPI(title=settings.api_title,
@@ -10,9 +12,13 @@ app = FastAPI(title=settings.api_title,
     debug=settings.debug) 
     
 app.include_router(market_router)
+app.include_router(strategies_router)
+app.include_router(trading_router)
 
 @app.get("/")
 async def read_root():
+    print(f"API Key: {settings.binance_api_key[:10]}...")
+    print(f"Secret Key: {settings.binance_secret_key[:10]}...")
     return {"message": f"Hello, World! {settings.api_title}"}
 
 if __name__ == "__main__": 
