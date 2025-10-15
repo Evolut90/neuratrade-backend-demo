@@ -1,11 +1,10 @@
-from app.models.market_data import Ticker
 from decimal import Decimal
 from datetime import datetime
 from app.core.config import settings
 import ccxt
 from typing import List
-from app.models.market_data import Candle
-from typing import Dict, Any, Optional
+from app.models.market_data import Candle 
+from app.services.mock_data_service import MockDataService
 
 
 class ExchangeService:
@@ -20,6 +19,18 @@ class ExchangeService:
         self.exchange_name = exchange_name
         self.testnet = testnet
         self.exchange = self._init_exchange()
+        self.use_mock_data = self._should_use_mock_data()
+    
+    def _should_use_mock_data(self) -> bool:
+        """Verifica se deve usar dados fictícios (quando não há API keys)"""
+        api_key = settings.binance_api_key
+        secret_key = settings.binance_secret_key
+        
+        # Use mock if keys are not set or are empty
+        if not api_key or not secret_key or api_key.strip() == "" or secret_key.strip() == "":
+            return True
+        
+        return False
     
     def _init_exchange(self) -> ccxt.Exchange:
         """Initialize the exchange with the settings"""
@@ -50,35 +61,7 @@ class ExchangeService:
             exchange_class = getattr(ccxt, self.exchange_name)
             return exchange_class({'enableRateLimit': True})
     
-    async def get_ticker(self, symbol: str) -> Ticker:
-        """
-        Get ticker data for a symbol
-        
-        Args:
-            symbol: Trading pair (ex: BTC/USDT)
-            
-        Returns:
-            Ticker object with the data
-        """
-        try:
-            ticker_data = self.exchange.fetch_ticker(symbol)
-            
-            return Ticker(
-                symbol=symbol,
-                last_price=Decimal(str(ticker_data['last'])),
-                bid=Decimal(str(ticker_data['bid'])) if ticker_data.get('bid') else None,
-                ask=Decimal(str(ticker_data['ask'])) if ticker_data.get('ask') else None,
-                high_24h=Decimal(str(ticker_data['high'])) if ticker_data.get('high') else None,
-                low_24h=Decimal(str(ticker_data['low'])) if ticker_data.get('low') else None,
-                volume_24h=Decimal(str(ticker_data['quoteVolume'])) if ticker_data.get('quoteVolume') else None,
-                change_24h=ticker_data.get('percentage'),
-                timestamp=datetime.now()
-            )
-        except Exception as e:
-            raise Exception(f"Erro ao buscar ticker: {str(e)}")
-
-
-
+ 
     async def get_ohlcv(self, symbol: str, timeframe: str = '1h', limit: int = 100) -> List[Candle]:
         """
         Get OHLCV (candlestick) data for a symbol
@@ -89,8 +72,11 @@ class ExchangeService:
             limit: Number of candles
         """
         try:
-            ohlcv_data = self.exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
-            
+            ohlcv_data = (
+                self.exchange.fetch_ohlcv(symbol, timeframe, limit=limit) 
+                if not self.use_mock_data 
+                else MockDataService.generate_ohlcv(symbol, timeframe, limit))
+                
             candles = []
             for candle_data in ohlcv_data:
                 candles.append(Candle(
@@ -105,66 +91,7 @@ class ExchangeService:
             return candles
         except Exception as e:
             raise Exception(f"Erro ao buscar OHLCV: {str(e)}")    
-
-    async def get_balance(self) -> Dict[str, Any]:
-            """
-            Get the balance of the account
-            
-            Returns:
-                Dictionary with the balance of each currency
-            """
-            try:
-                balance = self.exchange.fetch_balance()
-                
-                # filter only balances with value
-                filtered_balance = {}
-                for currency, amount in balance['total'].items():
-                    if amount > 0:
-                        filtered_balance[currency] = {
-                            'total': amount,
-                            'free': balance['free'].get(currency, 0),
-                            'used': balance['used'].get(currency, 0)
-                        }
-                
-                return filtered_balance
-            except Exception as e:
-                raise Exception(f"Erro ao buscar saldo: {str(e)}")      
-
-
-    async def create_order(
-        self,
-        symbol: str,
-        side: str,
-        amount: float,
-        price: Optional[float] = None,
-        order_type: str = "limit"
-    ) -> Dict[str, Any]:
-        """
-        Create an order in the exchange
-        
-        Args:
-            symbol: Trading pair
-            side: buy ou sell
-            amount: Amount
-            price: Price (None for market order)
-            order_type: limit or market 
-            
-        Returns:
-            Data of the created order
-        """
-        try:
-            if order_type == "market":
-                order = self.exchange.create_market_order(symbol, side, amount)
-            else:
-                if price is None:
-                    raise ValueError("Price is required for limit order")
-                order = self.exchange.create_limit_order(symbol, side, amount, price)
-            
-            return order
-        except Exception as e:
-            raise Exception(f"Error creating order: {str(e)}")
-
-
+ 
              
 # Instância global do serviço
 exchange_service = ExchangeService(exchange_name="binance", testnet=True)            

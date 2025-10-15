@@ -28,3 +28,22 @@ python-multipart==0.0.20
 
 # Fix para Python 3.12
 setuptools>=69.0.0
+
+# Technical Analysis
+TA-Lib==0.4.28
+
+# External Data & Sentiment Analysis
+aiohttp==3.11.11
+beautifulsoup4==4.12.3
+requests==2.31.0
+
+# Reddit API
+praw==7.7.1
+
+# Google Trends API
+pytrends==4.9.2
+
+# Natural Language Processing for sentiment
+textblob==0.17.1
+nltk==3.8.1
+ 
