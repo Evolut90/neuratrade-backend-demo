@@ -2,7 +2,13 @@ from app.models.strategy import Strategy
 from typing import Dict, Any
 from app.services.exchange_service import exchange_service
 from datetime import datetime
+from app.models.market_data import MarketIndicators, Candle
+from typing import List, Optional
+import numpy as np
+import logging
+import talib
 
+logger = logging.getLogger(__name__)
 
 class StrategyService:
     def __init__(self):
@@ -29,7 +35,9 @@ class StrategyService:
             if not candles or len(candles) == 0:
                 raise ValueError(f"Unable to get market data for {symbol}")
             
-            # Calculate indicators
+            # Calculate indicators 
+            indicators = self.calculate_indicators(candles, symbol, timeframe)
+            current_price = float(candles[-1].close)
 
              # Dados fictícios para as estratégias
             strategies_data = [
@@ -105,6 +113,503 @@ class StrategyService:
                     "timestamp": datetime.now().isoformat()
                 }
             }
+
+
+    def calculate_indicators(self, candles: List[Candle], symbol: str, timeframe: str) -> MarketIndicators:
+            """
+           
+            Calculated using the data from the candlestick
+            
+            Args:
+                candles: List of candles
+                symbol: Symbol of the pair
+                timeframe: Timeframe of the data
+                
+            Returns:
+                Object with the calculated indicators
+            """
+            if len(candles) < 20:
+                raise ValueError("Minimum of 20 candles required to calculate indicators")
+            
+            # Extrair arrays de preços
+            closes = np.array([float(c.close) for c in candles])
+            highs = np.array([float(c.high) for c in candles])
+            lows = np.array([float(c.low) for c in candles])
+            opens = np.array([float(c.open) for c in candles])
+            volumes = np.array([float(c.volume) for c in candles])
+            
+            # Basic Indicators
+            rsi = self._calculate_rsi(closes, period=14)
+            macd, signal, histogram = self._calculate_macd(closes)
+            bb_upper, bb_middle, bb_lower = self._calculate_bollinger_bands(closes, period=20)
+            ema_20 = self._calculate_ema(closes, period=20)
+            ema_50 = self._calculate_ema(closes, period=50) if len(closes) >= 50 else None
+            sma_200 = self._calculate_sma(closes, period=200) if len(closes) >= 200 else None
+            
+            # Advanced Indicators
+            stoch_rsi_k, stoch_rsi_d = self._calculate_stochastic_rsi(closes)
+            adx = self._calculate_adx(highs, lows, closes)
+            atr = self._calculate_atr(highs, lows, closes)
+            williams_r = self._calculate_williams_r(highs, lows, closes)
+            cci = self._calculate_cci(highs, lows, closes)
+            mfi = self._calculate_mfi(highs, lows, closes, volumes)
+            parabolic_sar = self._calculate_parabolic_sar(highs, lows)
+            aroon_up, aroon_down = self._calculate_aroon(highs, lows)
+            kc_upper, kc_middle, kc_lower = self._calculate_keltner_channels(highs, lows, closes)
+            
+            # Pattern Recognition
+            try:
+                candlestick_patterns = self._detect_candlestick_patterns(opens, highs, lows, closes)
+                pattern_analysis = self._analyze_pattern_strength(candlestick_patterns)
+            except Exception as e:
+                logger.warning(f"Erro ao detectar padrões: {e}")
+                candlestick_patterns = {}
+                pattern_analysis = {
+                    "signal": "neutral",
+                    "strength": 0.0,
+                    "description": "Erro na análise de padrões",
+                    "pattern_count": 0
+                }
+            
+            return MarketIndicators(
+                symbol=symbol,
+                timeframe=timeframe,
+                # Basic Indicators
+                rsi=float(rsi) if rsi is not None else None,
+                macd=float(macd) if macd is not None else None,
+                macd_signal=float(signal) if signal is not None else None,
+                macd_histogram=float(histogram) if histogram is not None else None,
+                bb_upper=float(bb_upper) if bb_upper is not None else None,
+                bb_middle=float(bb_middle) if bb_middle is not None else None,
+                bb_lower=float(bb_lower) if bb_lower is not None else None,
+                ema_20=float(ema_20) if ema_20 is not None else None,
+                ema_50=float(ema_50) if ema_50 is not None else None,
+                sma_200=float(sma_200) if sma_200 is not None else None,
+                # Advanced Indicators (with precision fix)
+                stoch_rsi_k=min(100.0, round(float(stoch_rsi_k), 2)) if stoch_rsi_k is not None else None,
+                stoch_rsi_d=min(100.0, round(float(stoch_rsi_d), 2)) if stoch_rsi_d is not None else None,
+                adx=min(100.0, round(float(adx), 2)) if adx is not None else None,
+                atr=round(float(atr), 2) if atr is not None else None,
+                williams_r=max(-100.0, min(0.0, round(float(williams_r), 2))) if williams_r is not None else None,
+                cci=round(float(cci), 2) if cci is not None else None,
+                mfi=min(100.0, round(float(mfi), 2)) if mfi is not None else None,
+                parabolic_sar=round(float(parabolic_sar), 2) if parabolic_sar is not None else None,
+                aroon_up=min(100.0, round(float(aroon_up), 2)) if aroon_up is not None else None,
+                aroon_down=min(100.0, round(float(aroon_down), 2)) if aroon_down is not None else None,
+                kc_upper=float(kc_upper) if kc_upper is not None else None,
+                kc_middle=float(kc_middle) if kc_middle is not None else None,
+                kc_lower=float(kc_lower) if kc_lower is not None else None,
+                # Pattern Recognition
+                candlestick_patterns=candlestick_patterns if candlestick_patterns else None,
+                pattern_signal=pattern_analysis.get("signal") if pattern_analysis else None,
+                pattern_strength=pattern_analysis.get("strength") if pattern_analysis else None,
+                timestamp=datetime.now()
+            )            
+
+
+  # Auxiliary methods for calculating indicators
+    
+    @staticmethod
+    def _calculate_rsi(prices: np.ndarray, period: int = 14) -> Optional[float]:
+        """Calculated using TA-Lib"""
+        try:
+            if len(prices) < period:
+                return None
+            
+            prices_float = prices.astype(float)
+            rsi = talib.RSI(prices_float, timeperiod=period)
+            
+            if np.isnan(rsi[-1]):
+                return None
+            
+            return float(rsi[-1])
+        except Exception:
+            return None
+
+    @staticmethod
+    def _calculate_macd(prices: np.ndarray, fast=12, slow=26, signal_period=9):
+        """Calculated using TA-Lib MACD"""
+        try:
+            if len(prices) < slow + signal_period:
+                return None, None, None
+            
+            prices_float = prices.astype(float)
+            macd, signal, histogram = talib.MACD(
+                prices_float, 
+                fastperiod=fast, 
+                slowperiod=slow, 
+                signalperiod=signal_period
+            )
+            
+            if np.isnan(macd[-1]) or np.isnan(signal[-1]):
+                return None, None, None
+            
+            return float(macd[-1]), float(signal[-1]), float(histogram[-1])
+        except Exception:
+            return None, None, None
+
+ 
+    @staticmethod
+    def _calculate_ema(prices: np.ndarray, period: int) -> Optional[float]:
+        """Calculated using TA-Lib EMA"""
+        try:
+            if len(prices) < period:
+                return None
+            
+            prices_float = prices.astype(float)
+            ema = talib.EMA(prices_float, timeperiod=period)
+            
+            if np.isnan(ema[-1]):
+                return None
+            
+            return float(ema[-1])
+        except Exception:
+            return None
+    
+    @staticmethod
+    def _calculate_sma(prices: np.ndarray, period: int) -> Optional[float]:
+        """Calculated using TA-Lib SMA"""
+        try:
+            if len(prices) < period:
+                return None
+            
+            prices_float = prices.astype(float)
+            sma = talib.SMA(prices_float, timeperiod=period)
+            
+            if np.isnan(sma[-1]):
+                return None
+            
+            return float(sma[-1])
+        except Exception:
+            return None
+    
+ 
+    
+    @staticmethod
+    def _calculate_bollinger_bands(prices: np.ndarray, period: int = 20, std_dev: float = 2.0):
+        """Calculated using TA-Lib Bollinger Bands"""
+        try:
+            if len(prices) < period:
+                return None, None, None
+            
+            prices_float = prices.astype(float)
+            upper, middle, lower = talib.BBANDS(
+                prices_float, 
+                timeperiod=period, 
+                nbdevup=std_dev, 
+                nbdevdn=std_dev
+            )
+            
+            if np.isnan(upper[-1]) or np.isnan(middle[-1]) or np.isnan(lower[-1]):
+                return None, None, None
+            
+            return float(upper[-1]), float(middle[-1]), float(lower[-1])
+        except Exception:
+            return None, None, None
+
+    # Advanced Technical Indicators using TA-Lib
+    
+    @staticmethod
+    def _calculate_stochastic_rsi(prices: np.ndarray, rsi_period: int = 14, stoch_period: int = 14):
+        """Calculated using TA-Lib Stochastic RSI"""
+        try:
+            if len(prices) < rsi_period + stoch_period:
+                return None, None
+            
+            prices_float = prices.astype(float)
+            fastk, fastd = talib.STOCHRSI(prices_float, timeperiod=rsi_period, fastk_period=stoch_period, fastd_period=3)
+            
+            if np.isnan(fastk[-1]) or np.isnan(fastd[-1]):
+                return None, None
+            
+            return float(fastk[-1]), float(fastd[-1])
+        except Exception:
+            return None, None
+
+    @staticmethod
+    def _calculate_adx(high: np.ndarray, low: np.ndarray, close: np.ndarray, period: int = 14):
+        """Calculated using TA-Lib ADX (Average Directional Index)"""
+        try:
+            if len(high) < period * 2:
+                return None
+            
+            high_float = high.astype(float)
+            low_float = low.astype(float)
+            close_float = close.astype(float)
+            
+            adx = talib.ADX(high_float, low_float, close_float, timeperiod=period)
+            
+            if np.isnan(adx[-1]):
+                return None
+            
+            return float(adx[-1])
+        except Exception:
+            return None
+
+    @staticmethod
+    def _calculate_atr(high: np.ndarray, low: np.ndarray, close: np.ndarray, period: int = 14):
+        """Calculated using TA-Lib ATR (Average True Range)"""
+        try:
+            if len(high) < period:
+                return None
+            
+            high_float = high.astype(float)
+            low_float = low.astype(float)
+            close_float = close.astype(float)
+            
+            atr = talib.ATR(high_float, low_float, close_float, timeperiod=period)
+            
+            if np.isnan(atr[-1]):
+                return None
+            
+            return float(atr[-1])
+        except Exception:
+            return None
+
+    @staticmethod
+    def _calculate_williams_r(high: np.ndarray, low: np.ndarray, close: np.ndarray, period: int = 14):
+        """Calculated using TA-Lib Williams %R"""
+        try:
+            if len(high) < period:
+                return None
+            
+            high_float = high.astype(float)
+            low_float = low.astype(float)
+            close_float = close.astype(float)
+            
+            willr = talib.WILLR(high_float, low_float, close_float, timeperiod=period)
+            
+            if np.isnan(willr[-1]):
+                return None
+            
+            return float(willr[-1])
+        except Exception:
+            return None
+
+    @staticmethod
+    def _calculate_cci(high: np.ndarray, low: np.ndarray, close: np.ndarray, period: int = 14):
+        """Calculated using TA-Lib CCI (Commodity Channel Index)"""
+        try:
+            if len(high) < period:
+                return None
+            
+            high_float = high.astype(float)
+            low_float = low.astype(float)
+            close_float = close.astype(float)
+            
+            cci = talib.CCI(high_float, low_float, close_float, timeperiod=period)
+            
+            if np.isnan(cci[-1]):
+                return None
+            
+            return float(cci[-1])
+        except Exception:
+            return None
+
+    @staticmethod
+    def _calculate_mfi(high: np.ndarray, low: np.ndarray, close: np.ndarray, volume: np.ndarray, period: int = 14):
+        """Calculated using TA-Lib MFI (Money Flow Index)"""
+        try:
+            if len(high) < period:
+                return None
+            
+            high_float = high.astype(float)
+            low_float = low.astype(float)
+            close_float = close.astype(float)
+            volume_float = volume.astype(float)
+            
+            mfi = talib.MFI(high_float, low_float, close_float, volume_float, timeperiod=period)
+            
+            if np.isnan(mfi[-1]):
+                return None
+            
+            return float(mfi[-1])
+        except Exception:
+            return None
+
+    @staticmethod
+    def _calculate_parabolic_sar(high: np.ndarray, low: np.ndarray, acceleration: float = 0.02, maximum: float = 0.2):
+        """Calculated using TA-Lib Parabolic SAR"""
+        try:
+            if len(high) < 2:
+                return None
+            
+            high_float = high.astype(float)
+            low_float = low.astype(float)
+            
+            sar = talib.SAR(high_float, low_float, acceleration=acceleration, maximum=maximum)
+            
+            if np.isnan(sar[-1]):
+                return None
+            
+            return float(sar[-1])
+        except Exception:
+            return None
+
+    @staticmethod
+    def _calculate_aroon(high: np.ndarray, low: np.ndarray, period: int = 14):
+        """Calculated using TA-Lib Aroon"""
+        try:
+            if len(high) < period:
+                return None, None
+            
+            high_float = high.astype(float)
+            low_float = low.astype(float)
+            
+            aroon_down, aroon_up = talib.AROON(high_float, low_float, timeperiod=period)
+            
+            if np.isnan(aroon_down[-1]) or np.isnan(aroon_up[-1]):
+                return None, None
+            
+            return float(aroon_down[-1]), float(aroon_up[-1])
+        except Exception:
+            return None, None
+
+    @staticmethod
+    def _calculate_keltner_channels(high: np.ndarray, low: np.ndarray, close: np.ndarray, period: int = 20, multiplier: float = 2.0):
+        """Calculated using TA-Lib Keltner Channels (manual implementation with EMA and ATR)"""
+        try:
+            if len(high) < period:
+                return None, None, None
+            
+            high_float = high.astype(float)
+            low_float = low.astype(float)
+            close_float = close.astype(float)
+            
+            # Calcular EMA central
+            ema = talib.EMA(close_float, timeperiod=period)
+            
+            # Calcular ATR
+            atr = talib.ATR(high_float, low_float, close_float, timeperiod=period)
+            
+            if np.isnan(ema[-1]) or np.isnan(atr[-1]):
+                return None, None, None
+            
+            middle = float(ema[-1])
+            upper = middle + (float(atr[-1]) * multiplier)
+            lower = middle - (float(atr[-1]) * multiplier)
+            
+            return upper, middle, lower
+        except Exception:
+            return None, None, None
+
+    # Pattern Recognition using TA-Lib
+    
+    @staticmethod
+    def _detect_candlestick_patterns(open_prices: np.ndarray, high: np.ndarray, low: np.ndarray, close: np.ndarray):
+        """Detected using TA-Lib Candlestick Patterns"""
+        try:
+            if len(open_prices) < 5:
+                return {}
+            
+            open_float = open_prices.astype(float)
+            high_float = high.astype(float)
+            low_float = low.astype(float)
+            close_float = close.astype(float)
+            
+            patterns = {}
+            
+            # Padrões de reversão (Reversal Patterns)
+            patterns["doji"] = talib.CDLDOJI(open_float, high_float, low_float, close_float)[-1]
+            patterns["hammer"] = talib.CDLHAMMER(open_float, high_float, low_float, close_float)[-1]
+            patterns["hanging_man"] = talib.CDLHANGINGMAN(open_float, high_float, low_float, close_float)[-1]
+            patterns["inverted_hammer"] = talib.CDLINVERTEDHAMMER(open_float, high_float, low_float, close_float)[-1]
+            patterns["shooting_star"] = talib.CDLSHOOTINGSTAR(open_float, high_float, low_float, close_float)[-1]
+            patterns["engulfing_bullish"] = talib.CDLENGULFING(open_float, high_float, low_float, close_float)[-1] > 0
+            patterns["engulfing_bearish"] = talib.CDLENGULFING(open_float, high_float, low_float, close_float)[-1] < 0
+            patterns["harami_bullish"] = talib.CDLHARAMI(open_float, high_float, low_float, close_float)[-1] > 0
+            patterns["harami_bearish"] = talib.CDLHARAMI(open_float, high_float, low_float, close_float)[-1] < 0
+            
+            # Padrões de continuação (Continuation Patterns)
+            patterns["three_white_soldiers"] = talib.CDL3WHITESOLDIERS(open_float, high_float, low_float, close_float)[-1]
+            patterns["three_black_crows"] = talib.CDL3BLACKCROWS(open_float, high_float, low_float, close_float)[-1]
+            patterns["morning_star"] = talib.CDLMORNINGSTAR(open_float, high_float, low_float, close_float)[-1]
+            patterns["evening_star"] = talib.CDLEVENINGSTAR(open_float, high_float, low_float, close_float)[-1]
+            
+            # Padrões de indecisão
+            patterns["spinning_top"] = talib.CDLSPINNINGTOP(open_float, high_float, low_float, close_float)[-1]
+            patterns["marubozu"] = talib.CDLMARUBOZU(open_float, high_float, low_float, close_float)[-1]
+            
+            # Converter para valores booleanos e remover NaN
+            result = {}
+            for pattern_name, value in patterns.items():
+                if not np.isnan(value):
+                    if isinstance(value, bool):
+                        result[pattern_name] = value
+                    else:
+                        result[pattern_name] = bool(value)
+                else:
+                    result[pattern_name] = False
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error detecting candlestick patterns: {e}")
+            return {}
+    
+    @staticmethod
+    def _analyze_pattern_strength(patterns: dict) -> dict:
+        """Analyzed the strength of the detected patterns"""
+        try:
+            bullish_patterns = [
+                "hammer", "inverted_hammer", "engulfing_bullish", 
+                "harami_bullish", "three_white_soldiers", "morning_star"
+            ]
+            
+            bearish_patterns = [
+                "hanging_man", "shooting_star", "engulfing_bearish", 
+                "harami_bearish", "three_black_crows", "evening_star"
+            ]
+            
+            neutral_patterns = ["doji", "spinning_top"]
+            
+            bullish_count = sum(1 for pattern in bullish_patterns if patterns.get(pattern, False))
+            bearish_count = sum(1 for pattern in bearish_patterns if patterns.get(pattern, False))
+            neutral_count = sum(1 for pattern in neutral_patterns if patterns.get(pattern, False))
+            
+            total_patterns = bullish_count + bearish_count + neutral_count
+            
+            if total_patterns == 0:
+                return {
+                    "signal": "neutral",
+                    "strength": 0.0,
+                    "description": "Nenhum padrão significativo detectado",
+                    "pattern_count": 0
+                }
+            
+            # Determinar sinal predominante
+            if bullish_count > bearish_count:
+                signal = "bullish"
+                strength = bullish_count / total_patterns
+                description = f"Bullish patterns detected ({bullish_count}/{total_patterns})"
+            elif bearish_count > bullish_count:
+                signal = "bearish"
+                strength = bearish_count / total_patterns
+                description = f"Bearish patterns detected ({bearish_count}/{total_patterns})"
+            else:
+                signal = "neutral"
+                strength = 0.5
+                description = f"Mixed patterns detected ({bullish_count} bullish, {bearish_count} bearish)"
+            
+            return {
+                "signal": signal,
+                "strength": round(strength, 3),
+                "description": description,
+                "pattern_count": total_patterns,
+                "bullish_patterns": bullish_count,
+                "bearish_patterns": bearish_count,
+                "neutral_patterns": neutral_count
+            }
+            
+        except Exception as e:
+            logger.error(f"Error analyzing the strength of the detected patterns: {e}")
+            return {
+                "signal": "neutral",
+                "strength": 0.0,
+                "description": "Error analyzing the strength of the detected patterns",
+                "pattern_count": 0
+            }
+
 
  
 
