@@ -1,12 +1,11 @@
-from app.models.strategy import Strategy
-from typing import Dict, Any
-from app.services.exchange_service import exchange_service
+from typing import Dict, List, Optional, Any
 from datetime import datetime
-from app.models.market_data import MarketIndicators, Candle
-from typing import List, Optional
 import numpy as np
-import logging
-import talib
+import logging 
+from app.models.market_data import Candle, MarketIndicators
+from app.services.exchange_service import exchange_service 
+import pandas_ta as ta
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 
@@ -116,108 +115,203 @@ class StrategyService:
 
 
     def calculate_indicators(self, candles: List[Candle], symbol: str, timeframe: str) -> MarketIndicators:
-            """
-           
-            Calculated using the data from the candlestick
+        """
+        Calcula indicadores técnicos a partir dos dados de candlestick
+        
+        Args:
+            candles: Lista de candles
+            symbol: Símbolo do par
+            timeframe: Timeframe dos dados
             
-            Args:
-                candles: List of candles
-                symbol: Symbol of the pair
-                timeframe: Timeframe of the data
-                
-            Returns:
-                Object with the calculated indicators
-            """
-            if len(candles) < 20:
-                raise ValueError("Minimum of 20 candles required to calculate indicators")
-            
-            # Extrair arrays de preços
-            closes = np.array([float(c.close) for c in candles])
-            highs = np.array([float(c.high) for c in candles])
-            lows = np.array([float(c.low) for c in candles])
-            opens = np.array([float(c.open) for c in candles])
-            volumes = np.array([float(c.volume) for c in candles])
-            
+        Returns:
+            Objeto com os indicadores calculados
+        """
+        if len(candles) < 20:
+            raise ValueError("Mínimo de 20 candles necessário para calcular indicadores")
+        
+        # Extrair arrays de preços
+        closes = np.array([float(c.close) for c in candles])
+        highs = np.array([float(c.high) for c in candles])
+        lows = np.array([float(c.low) for c in candles])
+        opens = np.array([float(c.open) for c in candles])
+        volumes = np.array([float(c.volume) for c in candles])
+        
+        # Basic Indicators
+        rsi = self._calculate_rsi(closes, period=14)
+        macd, signal, histogram = self._calculate_macd(closes)
+        bb_upper, bb_middle, bb_lower = self._calculate_bollinger_bands(closes, period=20)
+        ema_20 = self._calculate_ema(closes, period=20)
+        ema_50 = self._calculate_ema(closes, period=50) if len(closes) >= 50 else None
+        sma_200 = self._calculate_sma(closes, period=200) if len(closes) >= 200 else None
+        
+        # Advanced Indicators
+        stoch_rsi_k, stoch_rsi_d = self._calculate_stochastic_rsi(closes)
+        adx = self._calculate_adx(highs, lows, closes)
+        atr = self._calculate_atr(highs, lows, closes)
+        williams_r = self._calculate_williams_r(highs, lows, closes)
+        cci = self._calculate_cci(highs, lows, closes)
+        mfi = self._calculate_mfi(highs, lows, closes, volumes)
+        parabolic_sar = self._calculate_parabolic_sar(highs, lows, closes)
+        aroon_up, aroon_down = self._calculate_aroon(highs, lows)
+        kc_upper, kc_middle, kc_lower = self._calculate_keltner_channels(highs, lows, closes)
+        
+        # Pattern Recognition
+        try:
+            candlestick_patterns = self._detect_candlestick_patterns(opens, highs, lows, closes)
+            pattern_analysis = self._analyze_pattern_strength(candlestick_patterns)
+        except Exception as e:
+            logger.warning(f"Erro ao detectar padrões: {e}")
+            candlestick_patterns = {}
+            pattern_analysis = {
+                "signal": "neutral",
+                "strength": 0.0,
+                "description": "Erro na análise de padrões",
+                "pattern_count": 0
+            }
+        
+        return MarketIndicators(
+            symbol=symbol,
+            timeframe=timeframe,
             # Basic Indicators
-            rsi = self._calculate_rsi(closes, period=14)
-            macd, signal, histogram = self._calculate_macd(closes)
-            bb_upper, bb_middle, bb_lower = self._calculate_bollinger_bands(closes, period=20)
-            ema_20 = self._calculate_ema(closes, period=20)
-            ema_50 = self._calculate_ema(closes, period=50) if len(closes) >= 50 else None
-            sma_200 = self._calculate_sma(closes, period=200) if len(closes) >= 200 else None
-            
-            # Advanced Indicators
-            stoch_rsi_k, stoch_rsi_d = self._calculate_stochastic_rsi(closes)
-            adx = self._calculate_adx(highs, lows, closes)
-            atr = self._calculate_atr(highs, lows, closes)
-            williams_r = self._calculate_williams_r(highs, lows, closes)
-            cci = self._calculate_cci(highs, lows, closes)
-            mfi = self._calculate_mfi(highs, lows, closes, volumes)
-            parabolic_sar = self._calculate_parabolic_sar(highs, lows)
-            aroon_up, aroon_down = self._calculate_aroon(highs, lows)
-            kc_upper, kc_middle, kc_lower = self._calculate_keltner_channels(highs, lows, closes)
-            
+            rsi=float(rsi) if rsi is not None else None,
+            macd=float(macd) if macd is not None else None,
+            macd_signal=float(signal) if signal is not None else None,
+            macd_histogram=float(histogram) if histogram is not None else None,
+            bb_upper=float(bb_upper) if bb_upper is not None else None,
+            bb_middle=float(bb_middle) if bb_middle is not None else None,
+            bb_lower=float(bb_lower) if bb_lower is not None else None,
+            ema_20=float(ema_20) if ema_20 is not None else None,
+            ema_50=float(ema_50) if ema_50 is not None else None,
+            sma_200=float(sma_200) if sma_200 is not None else None,
+            # Advanced Indicators (with precision fix)
+            stoch_rsi_k=min(100.0, round(float(stoch_rsi_k), 2)) if stoch_rsi_k is not None else None,
+            stoch_rsi_d=min(100.0, round(float(stoch_rsi_d), 2)) if stoch_rsi_d is not None else None,
+            adx=min(100.0, round(float(adx), 2)) if adx is not None else None,
+            atr=round(float(atr), 2) if atr is not None else None,
+            williams_r=max(-100.0, min(0.0, round(float(williams_r), 2))) if williams_r is not None else None,
+            cci=round(float(cci), 2) if cci is not None else None,
+            mfi=min(100.0, round(float(mfi), 2)) if mfi is not None else None,
+            parabolic_sar=round(float(parabolic_sar), 2) if parabolic_sar is not None else None,
+            aroon_up=min(100.0, round(float(aroon_up), 2)) if aroon_up is not None else None,
+            aroon_down=min(100.0, round(float(aroon_down), 2)) if aroon_down is not None else None,
+            kc_upper=float(kc_upper) if kc_upper is not None else None,
+            kc_middle=float(kc_middle) if kc_middle is not None else None,
+            kc_lower=float(kc_lower) if kc_lower is not None else None,
             # Pattern Recognition
-            try:
-                candlestick_patterns = self._detect_candlestick_patterns(opens, highs, lows, closes)
-                pattern_analysis = self._analyze_pattern_strength(candlestick_patterns)
-            except Exception as e:
-                logger.warning(f"Erro ao detectar padrões: {e}")
-                candlestick_patterns = {}
-                pattern_analysis = {
-                    "signal": "neutral",
-                    "strength": 0.0,
-                    "description": "Erro na análise de padrões",
-                    "pattern_count": 0
-                }
-            
-            return MarketIndicators(
-                symbol=symbol,
-                timeframe=timeframe,
-                # Basic Indicators
-                rsi=float(rsi) if rsi is not None else None,
-                macd=float(macd) if macd is not None else None,
-                macd_signal=float(signal) if signal is not None else None,
-                macd_histogram=float(histogram) if histogram is not None else None,
-                bb_upper=float(bb_upper) if bb_upper is not None else None,
-                bb_middle=float(bb_middle) if bb_middle is not None else None,
-                bb_lower=float(bb_lower) if bb_lower is not None else None,
-                ema_20=float(ema_20) if ema_20 is not None else None,
-                ema_50=float(ema_50) if ema_50 is not None else None,
-                sma_200=float(sma_200) if sma_200 is not None else None,
-                # Advanced Indicators (with precision fix)
-                stoch_rsi_k=min(100.0, round(float(stoch_rsi_k), 2)) if stoch_rsi_k is not None else None,
-                stoch_rsi_d=min(100.0, round(float(stoch_rsi_d), 2)) if stoch_rsi_d is not None else None,
-                adx=min(100.0, round(float(adx), 2)) if adx is not None else None,
-                atr=round(float(atr), 2) if atr is not None else None,
-                williams_r=max(-100.0, min(0.0, round(float(williams_r), 2))) if williams_r is not None else None,
-                cci=round(float(cci), 2) if cci is not None else None,
-                mfi=min(100.0, round(float(mfi), 2)) if mfi is not None else None,
-                parabolic_sar=round(float(parabolic_sar), 2) if parabolic_sar is not None else None,
-                aroon_up=min(100.0, round(float(aroon_up), 2)) if aroon_up is not None else None,
-                aroon_down=min(100.0, round(float(aroon_down), 2)) if aroon_down is not None else None,
-                kc_upper=float(kc_upper) if kc_upper is not None else None,
-                kc_middle=float(kc_middle) if kc_middle is not None else None,
-                kc_lower=float(kc_lower) if kc_lower is not None else None,
-                # Pattern Recognition
-                candlestick_patterns=candlestick_patterns if candlestick_patterns else None,
-                pattern_signal=pattern_analysis.get("signal") if pattern_analysis else None,
-                pattern_strength=pattern_analysis.get("strength") if pattern_analysis else None,
-                timestamp=datetime.now()
-            )            
+            candlestick_patterns=candlestick_patterns if candlestick_patterns else None,
+            pattern_signal=pattern_analysis.get("signal") if pattern_analysis else None,
+            pattern_strength=pattern_analysis.get("strength") if pattern_analysis else None,
+            timestamp=datetime.now()
+        )   
 
+    # methods for different strategies
+    def hybrid_intelligent_strategy(self,indicators, current_price, candles):
+        """
+        Estratégia híbrida que analisa todos os indicadores
+        e ajusta o peso baseado no contexto de mercado
+        """
+        score = 0
+        max_score = 10
+        
+        # === ANÁLISE DE TENDÊNCIA (peso: 3) ===
+        trend_score = 0
+        
+        if indicators.ema_20 > indicators.ema_50:
+            trend_score += 1
+        else:
+            trend_score -= 1
+        
+        if indicators.ema_50 and indicators.sma_200:
+            if indicators.ema_50 > indicators.sma_200:
+                trend_score += 1
+            else:
+                trend_score -= 1
+        
+        if current_price > float(indicators.sma_200):
+            trend_score += 1
+        else:
+            trend_score -= 1
+        
+        score += trend_score
+        
+        # === ANÁLISE DE MOMENTUM (peso: 3) ===
+        momentum_score = 0
+        
+        # RSI
+        if indicators.rsi < 30:
+            momentum_score += 2
+        elif indicators.rsi < 40:
+            momentum_score += 1
+        elif indicators.rsi > 70:
+            momentum_score -= 2
+        elif indicators.rsi > 60:
+            momentum_score -= 1
+        
+        # MACD
+        if indicators.macd > indicators.macd_signal:
+            momentum_score += 1
+        else:
+            momentum_score -= 1
+        
+        score += momentum_score
+        
+        # === ANÁLISE DE VOLATILIDADE (peso: 2) ===
+        volatility_score = 0
+        
+        bb_position = (current_price - float(indicators.bb_lower)) / (float(indicators.bb_upper) - float(indicators.bb_lower))
+        
+        if bb_position < 0.2:  # Próximo da banda inferior
+            volatility_score += 2
+        elif bb_position < 0.4:
+            volatility_score += 1
+        elif bb_position > 0.8:  # Próximo da banda superior
+            volatility_score -= 2
+        elif bb_position > 0.6:
+            volatility_score -= 1
+        
+        score += volatility_score
+        
+        # === ANÁLISE DE FORÇA DO MOVIMENTO (peso: 2) ===
+        # Verificar se o preço está acelerando
+        recent_closes = [float(c.close) for c in candles[-5:]]
+        price_momentum = (recent_closes[-1] - recent_closes[0]) / recent_closes[0]
+        
+        if price_momentum > 0.02:  # Subindo mais de 2%
+            score += 1
+        elif price_momentum < -0.02:  # Caindo mais de 2%
+            score -= 1
+        
+        # Histograma MACD crescendo
+        if indicators.macd_histogram > 0:
+            score += 1
+        else:
+            score -= 1
+        
+        # === DECISÃO FINAL ===
+        if score >= 5:
+            signal = "buy"
+            confidence = min(1.0, 0.5 + (score / max_score) * 0.5)
+        elif score <= -5:
+            signal = "sell"
+            confidence = min(1.0, 0.5 + (abs(score) / max_score) * 0.5)
+        else:
+            signal = "hold"
+            confidence = 0.3 + (abs(score) / max_score) * 0.2
+        
+        return signal, confidence, score        
 
-  # Auxiliary methods for calculating indicators
+    
+    # Auxiliary methods for calculating indicators
     
     @staticmethod
     def _calculate_rsi(prices: np.ndarray, period: int = 14) -> Optional[float]:
-        """Calculated using TA-Lib"""
+        """Calcula o RSI usando TA-Lib"""
         try:
             if len(prices) < period:
                 return None
             
-            prices_float = prices.astype(float)
-            rsi = talib.RSI(prices_float, timeperiod=period)
+            prices_series = pd.Series(prices.astype(float))
+            rsi = ta.rsi(prices_series, length=period)
             
             if np.isnan(rsi[-1]):
                 return None
@@ -228,18 +322,16 @@ class StrategyService:
 
     @staticmethod
     def _calculate_macd(prices: np.ndarray, fast=12, slow=26, signal_period=9):
-        """Calculated using TA-Lib MACD"""
+        """Calcula o MACD usando TA-Lib"""
         try:
             if len(prices) < slow + signal_period:
                 return None, None, None
             
-            prices_float = prices.astype(float)
-            macd, signal, histogram = talib.MACD(
-                prices_float, 
-                fastperiod=fast, 
-                slowperiod=slow, 
-                signalperiod=signal_period
-            )
+            prices_series = pd.Series(prices.astype(float))
+            macd_result = ta.macd(prices_series, fast=fast, slow=slow, signal=signal_period)
+            macd = macd_result[f'MACD_{fast}_{slow}_{signal_period}']
+            signal = macd_result[f'MACDs_{fast}_{slow}_{signal_period}']
+            histogram = macd_result[f'MACDh_{fast}_{slow}_{signal_period}']
             
             if np.isnan(macd[-1]) or np.isnan(signal[-1]):
                 return None, None, None
@@ -251,13 +343,13 @@ class StrategyService:
  
     @staticmethod
     def _calculate_ema(prices: np.ndarray, period: int) -> Optional[float]:
-        """Calculated using TA-Lib EMA"""
+        """Calcula a EMA usando TA-Lib"""
         try:
             if len(prices) < period:
                 return None
             
-            prices_float = prices.astype(float)
-            ema = talib.EMA(prices_float, timeperiod=period)
+            prices_series = pd.Series(prices.astype(float))
+            ema = ta.ema(prices_series, length=period)
             
             if np.isnan(ema[-1]):
                 return None
@@ -268,13 +360,13 @@ class StrategyService:
     
     @staticmethod
     def _calculate_sma(prices: np.ndarray, period: int) -> Optional[float]:
-        """Calculated using TA-Lib SMA"""
+        """Calcula a SMA usando TA-Lib"""
         try:
             if len(prices) < period:
                 return None
             
-            prices_float = prices.astype(float)
-            sma = talib.SMA(prices_float, timeperiod=period)
+            prices_series = pd.Series(prices.astype(float))
+            sma = ta.sma(prices_series, length=period)
             
             if np.isnan(sma[-1]):
                 return None
@@ -287,18 +379,16 @@ class StrategyService:
     
     @staticmethod
     def _calculate_bollinger_bands(prices: np.ndarray, period: int = 20, std_dev: float = 2.0):
-        """Calculated using TA-Lib Bollinger Bands"""
+        """Calcula as Bandas de Bollinger usando TA-Lib"""
         try:
             if len(prices) < period:
                 return None, None, None
             
-            prices_float = prices.astype(float)
-            upper, middle, lower = talib.BBANDS(
-                prices_float, 
-                timeperiod=period, 
-                nbdevup=std_dev, 
-                nbdevdn=std_dev
-            )
+            prices_series = pd.Series(prices.astype(float))
+            bb_result = ta.bbands(prices_series, length=period, std=std_dev)
+            upper = bb_result[f'BBU_{period}_{std_dev}']
+            middle = bb_result[f'BBM_{period}_{std_dev}']
+            lower = bb_result[f'BBL_{period}_{std_dev}']
             
             if np.isnan(upper[-1]) or np.isnan(middle[-1]) or np.isnan(lower[-1]):
                 return None, None, None
@@ -311,13 +401,15 @@ class StrategyService:
     
     @staticmethod
     def _calculate_stochastic_rsi(prices: np.ndarray, rsi_period: int = 14, stoch_period: int = 14):
-        """Calculated using TA-Lib Stochastic RSI"""
+        """Calcula o Stochastic RSI usando TA-Lib"""
         try:
             if len(prices) < rsi_period + stoch_period:
                 return None, None
             
-            prices_float = prices.astype(float)
-            fastk, fastd = talib.STOCHRSI(prices_float, timeperiod=rsi_period, fastk_period=stoch_period, fastd_period=3)
+            prices_series = pd.Series(prices.astype(float))
+            stoch_result = ta.stochrsi(prices_series, length=rsi_period, rsi_length=rsi_period, k=stoch_period, d=3)
+            fastk = stoch_result[f'STOCHRSIk_{rsi_period}_{rsi_period}_{stoch_period}_3']
+            fastd = stoch_result[f'STOCHRSId_{rsi_period}_{rsi_period}_{stoch_period}_3']
             
             if np.isnan(fastk[-1]) or np.isnan(fastd[-1]):
                 return None, None
@@ -328,16 +420,16 @@ class StrategyService:
 
     @staticmethod
     def _calculate_adx(high: np.ndarray, low: np.ndarray, close: np.ndarray, period: int = 14):
-        """Calculated using TA-Lib ADX (Average Directional Index)"""
+        """Calcula o ADX (Average Directional Index) usando TA-Lib"""
         try:
             if len(high) < period * 2:
                 return None
             
-            high_float = high.astype(float)
-            low_float = low.astype(float)
-            close_float = close.astype(float)
+            high_series = pd.Series(high.astype(float))
+            low_series = pd.Series(low.astype(float))
+            close_series = pd.Series(close.astype(float))
             
-            adx = talib.ADX(high_float, low_float, close_float, timeperiod=period)
+            adx = ta.adx(high_series, low_series, close_series, length=period)
             
             if np.isnan(adx[-1]):
                 return None
@@ -348,16 +440,16 @@ class StrategyService:
 
     @staticmethod
     def _calculate_atr(high: np.ndarray, low: np.ndarray, close: np.ndarray, period: int = 14):
-        """Calculated using TA-Lib ATR (Average True Range)"""
+        """Calcula o ATR (Average True Range) usando TA-Lib"""
         try:
             if len(high) < period:
                 return None
             
-            high_float = high.astype(float)
-            low_float = low.astype(float)
-            close_float = close.astype(float)
+            high_series = pd.Series(high.astype(float))
+            low_series = pd.Series(low.astype(float))
+            close_series = pd.Series(close.astype(float))
             
-            atr = talib.ATR(high_float, low_float, close_float, timeperiod=period)
+            atr = ta.atr(high_series, low_series, close_series, length=period)
             
             if np.isnan(atr[-1]):
                 return None
@@ -368,16 +460,16 @@ class StrategyService:
 
     @staticmethod
     def _calculate_williams_r(high: np.ndarray, low: np.ndarray, close: np.ndarray, period: int = 14):
-        """Calculated using TA-Lib Williams %R"""
+        """Calcula o Williams %R usando TA-Lib"""
         try:
             if len(high) < period:
                 return None
             
-            high_float = high.astype(float)
-            low_float = low.astype(float)
-            close_float = close.astype(float)
+            high_series = pd.Series(high.astype(float))
+            low_series = pd.Series(low.astype(float))
+            close_series = pd.Series(close.astype(float))
             
-            willr = talib.WILLR(high_float, low_float, close_float, timeperiod=period)
+            willr = ta.willr(high_series, low_series, close_series, length=period)
             
             if np.isnan(willr[-1]):
                 return None
@@ -388,16 +480,16 @@ class StrategyService:
 
     @staticmethod
     def _calculate_cci(high: np.ndarray, low: np.ndarray, close: np.ndarray, period: int = 14):
-        """Calculated using TA-Lib CCI (Commodity Channel Index)"""
+        """Calcula o CCI (Commodity Channel Index) usando TA-Lib"""
         try:
             if len(high) < period:
                 return None
             
-            high_float = high.astype(float)
-            low_float = low.astype(float)
-            close_float = close.astype(float)
+            high_series = pd.Series(high.astype(float))
+            low_series = pd.Series(low.astype(float))
+            close_series = pd.Series(close.astype(float))
             
-            cci = talib.CCI(high_float, low_float, close_float, timeperiod=period)
+            cci = ta.cci(high_series, low_series, close_series, length=period)
             
             if np.isnan(cci[-1]):
                 return None
@@ -408,17 +500,17 @@ class StrategyService:
 
     @staticmethod
     def _calculate_mfi(high: np.ndarray, low: np.ndarray, close: np.ndarray, volume: np.ndarray, period: int = 14):
-        """Calculated using TA-Lib MFI (Money Flow Index)"""
+        """Calcula o MFI (Money Flow Index) usando TA-Lib"""
         try:
             if len(high) < period:
                 return None
             
-            high_float = high.astype(float)
-            low_float = low.astype(float)
-            close_float = close.astype(float)
-            volume_float = volume.astype(float)
+            high_series = pd.Series(high.astype(float))
+            low_series = pd.Series(low.astype(float))
+            close_series = pd.Series(close.astype(float))
+            volume_series = pd.Series(volume.astype(float))
             
-            mfi = talib.MFI(high_float, low_float, close_float, volume_float, timeperiod=period)
+            mfi = ta.mfi(high_series, low_series, close_series, volume_series, length=period)
             
             if np.isnan(mfi[-1]):
                 return None
@@ -428,16 +520,17 @@ class StrategyService:
             return None
 
     @staticmethod
-    def _calculate_parabolic_sar(high: np.ndarray, low: np.ndarray, acceleration: float = 0.02, maximum: float = 0.2):
-        """Calculated using TA-Lib Parabolic SAR"""
+    def _calculate_parabolic_sar(high: np.ndarray, low: np.ndarray, close: np.ndarray, acceleration: float = 0.02, maximum: float = 0.2):
+        """Calcula o Parabolic SAR usando pandas_ta"""
         try:
             if len(high) < 2:
                 return None
             
-            high_float = high.astype(float)
-            low_float = low.astype(float)
+            high_series = pd.Series(high.astype(float))
+            low_series = pd.Series(low.astype(float))
+            close_series = pd.Series(close.astype(float))
             
-            sar = talib.SAR(high_float, low_float, acceleration=acceleration, maximum=maximum)
+            sar = ta.psar(high_series, low_series, close_series, step=acceleration, max_step=maximum)
             
             if np.isnan(sar[-1]):
                 return None
@@ -448,15 +541,17 @@ class StrategyService:
 
     @staticmethod
     def _calculate_aroon(high: np.ndarray, low: np.ndarray, period: int = 14):
-        """Calculated using TA-Lib Aroon"""
+        """Calcula o Aroon usando TA-Lib"""
         try:
             if len(high) < period:
                 return None, None
             
-            high_float = high.astype(float)
-            low_float = low.astype(float)
+            high_series = pd.Series(high.astype(float))
+            low_series = pd.Series(low.astype(float))
             
-            aroon_down, aroon_up = talib.AROON(high_float, low_float, timeperiod=period)
+            aroon_result = ta.aroon(high_series, low_series, length=period)
+            aroon_down = aroon_result[f'AROOND_{period}']
+            aroon_up = aroon_result[f'AROONU_{period}']
             
             if np.isnan(aroon_down[-1]) or np.isnan(aroon_up[-1]):
                 return None, None
@@ -467,20 +562,20 @@ class StrategyService:
 
     @staticmethod
     def _calculate_keltner_channels(high: np.ndarray, low: np.ndarray, close: np.ndarray, period: int = 20, multiplier: float = 2.0):
-        """Calculated using TA-Lib Keltner Channels (manual implementation with EMA and ATR)"""
+        """Calcula os Keltner Channels (implementação manual com EMA e ATR)"""
         try:
             if len(high) < period:
                 return None, None, None
             
-            high_float = high.astype(float)
-            low_float = low.astype(float)
-            close_float = close.astype(float)
+            high_series = pd.Series(high.astype(float))
+            low_series = pd.Series(low.astype(float))
+            close_series = pd.Series(close.astype(float))
             
             # Calcular EMA central
-            ema = talib.EMA(close_float, timeperiod=period)
+            ema = ta.ema(close_series, length=period)
             
             # Calcular ATR
-            atr = talib.ATR(high_float, low_float, close_float, timeperiod=period)
+            atr = ta.atr(high_series, low_series, close_series, length=period)
             
             if np.isnan(ema[-1]) or np.isnan(atr[-1]):
                 return None, None, None
@@ -497,38 +592,38 @@ class StrategyService:
     
     @staticmethod
     def _detect_candlestick_patterns(open_prices: np.ndarray, high: np.ndarray, low: np.ndarray, close: np.ndarray):
-        """Detected using TA-Lib Candlestick Patterns"""
+        """Detecta padrões de candlestick usando TA-Lib"""
         try:
             if len(open_prices) < 5:
                 return {}
             
-            open_float = open_prices.astype(float)
-            high_float = high.astype(float)
-            low_float = low.astype(float)
-            close_float = close.astype(float)
+            open_series = pd.Series(open_prices.astype(float))
+            high_series = pd.Series(high.astype(float))
+            low_series = pd.Series(low.astype(float))
+            close_series = pd.Series(close.astype(float))
             
             patterns = {}
             
             # Padrões de reversão (Reversal Patterns)
-            patterns["doji"] = talib.CDLDOJI(open_float, high_float, low_float, close_float)[-1]
-            patterns["hammer"] = talib.CDLHAMMER(open_float, high_float, low_float, close_float)[-1]
-            patterns["hanging_man"] = talib.CDLHANGINGMAN(open_float, high_float, low_float, close_float)[-1]
-            patterns["inverted_hammer"] = talib.CDLINVERTEDHAMMER(open_float, high_float, low_float, close_float)[-1]
-            patterns["shooting_star"] = talib.CDLSHOOTINGSTAR(open_float, high_float, low_float, close_float)[-1]
-            patterns["engulfing_bullish"] = talib.CDLENGULFING(open_float, high_float, low_float, close_float)[-1] > 0
-            patterns["engulfing_bearish"] = talib.CDLENGULFING(open_float, high_float, low_float, close_float)[-1] < 0
-            patterns["harami_bullish"] = talib.CDLHARAMI(open_float, high_float, low_float, close_float)[-1] > 0
-            patterns["harami_bearish"] = talib.CDLHARAMI(open_float, high_float, low_float, close_float)[-1] < 0
+            patterns["doji"] = ta.cdl_doji(open_series, high_series, low_series, close_series)[-1]
+            patterns["hammer"] = ta.cdl_hammer(open_series, high_series, low_series, close_series)[-1]
+            patterns["hanging_man"] = ta.cdl_hanging_man(open_series, high_series, low_series, close_series)[-1]
+            patterns["inverted_hammer"] = ta.cdl_inverted_hammer(open_series, high_series, low_series, close_series)[-1]
+            patterns["shooting_star"] = ta.cdl_shooting_star(open_series, high_series, low_series, close_series)[-1]
+            patterns["engulfing_bullish"] = ta.cdl_engulfing(open_series, high_series, low_series, close_series)[-1] > 0
+            patterns["engulfing_bearish"] = ta.cdl_engulfing(open_series, high_series, low_series, close_series)[-1] < 0
+            patterns["harami_bullish"] = ta.cdl_harami(open_series, high_series, low_series, close_series)[-1] > 0
+            patterns["harami_bearish"] = ta.cdl_harami(open_series, high_series, low_series, close_series)[-1] < 0
             
             # Padrões de continuação (Continuation Patterns)
-            patterns["three_white_soldiers"] = talib.CDL3WHITESOLDIERS(open_float, high_float, low_float, close_float)[-1]
-            patterns["three_black_crows"] = talib.CDL3BLACKCROWS(open_float, high_float, low_float, close_float)[-1]
-            patterns["morning_star"] = talib.CDLMORNINGSTAR(open_float, high_float, low_float, close_float)[-1]
-            patterns["evening_star"] = talib.CDLEVENINGSTAR(open_float, high_float, low_float, close_float)[-1]
+            patterns["three_white_soldiers"] = ta.cdl_3whitesoldiers(open_series, high_series, low_series, close_series)[-1]
+            patterns["three_black_crows"] = ta.cdl_3blackcrows(open_series, high_series, low_series, close_series)[-1]
+            patterns["morning_star"] = ta.cdl_morningstar(open_series, high_series, low_series, close_series)[-1]
+            patterns["evening_star"] = ta.cdl_eveningstar(open_series, high_series, low_series, close_series)[-1]
             
             # Padrões de indecisão
-            patterns["spinning_top"] = talib.CDLSPINNINGTOP(open_float, high_float, low_float, close_float)[-1]
-            patterns["marubozu"] = talib.CDLMARUBOZU(open_float, high_float, low_float, close_float)[-1]
+            patterns["spinning_top"] = ta.cdl_spinning_top(open_series, high_series, low_series, close_series)[-1]
+            patterns["marubozu"] = ta.cdl_marubozu(open_series, high_series, low_series, close_series)[-1]
             
             # Converter para valores booleanos e remover NaN
             result = {}
@@ -544,12 +639,12 @@ class StrategyService:
             return result
             
         except Exception as e:
-            logger.error(f"Error detecting candlestick patterns: {e}")
+            logger.error(f"Erro ao detectar padrões de candlestick: {e}")
             return {}
     
     @staticmethod
     def _analyze_pattern_strength(patterns: dict) -> dict:
-        """Analyzed the strength of the detected patterns"""
+        """Analisa a força dos padrões detectados"""
         try:
             bullish_patterns = [
                 "hammer", "inverted_hammer", "engulfing_bullish", 
@@ -581,15 +676,15 @@ class StrategyService:
             if bullish_count > bearish_count:
                 signal = "bullish"
                 strength = bullish_count / total_patterns
-                description = f"Bullish patterns detected ({bullish_count}/{total_patterns})"
+                description = f"Padrões de alta detectados ({bullish_count}/{total_patterns})"
             elif bearish_count > bullish_count:
                 signal = "bearish"
                 strength = bearish_count / total_patterns
-                description = f"Bearish patterns detected ({bearish_count}/{total_patterns})"
+                description = f"Padrões de baixa detectados ({bearish_count}/{total_patterns})"
             else:
                 signal = "neutral"
                 strength = 0.5
-                description = f"Mixed patterns detected ({bullish_count} bullish, {bearish_count} bearish)"
+                description = f"Padrões mistos detectados ({bullish_count} alta, {bearish_count} baixa)"
             
             return {
                 "signal": signal,
@@ -602,16 +697,14 @@ class StrategyService:
             }
             
         except Exception as e:
-            logger.error(f"Error analyzing the strength of the detected patterns: {e}")
+            logger.error(f"Erro ao analisar força dos padrões: {e}")
             return {
                 "signal": "neutral",
                 "strength": 0.0,
-                "description": "Error analyzing the strength of the detected patterns",
+                "description": "Erro na análise de padrões",
                 "pattern_count": 0
             }
 
 
- 
-
-
+# Instância global do serviço
 strategy_service = StrategyService()
