@@ -6,11 +6,9 @@ Script to test the comparison of all strategies
 import requests 
 from datetime import datetime
 import urllib.parse
-
-# Settings
-BASE_URL = "http://127.0.0.1:8000"
-SYMBOLS = ["BTC/USDT", "ETH/USDT"]
-TIMEFRAMES = ["15m", "1h", "4h"]
+from app.services.strategy_service import StrategyService
+import asyncio
+ 
   
 
 
@@ -34,7 +32,7 @@ def print_strategy_result(name, result):
     print(f"  {'':20}    {result['description']}")
 
 
-def test_compare_strategies(symbol, timeframe="1h"):
+async def test_compare_strategies(symbol, timeframe="1h"):
     """Test all strategies"""
     print_separator()
     print(f"🔍 ANALYSING: {symbol} ({timeframe})")
@@ -42,21 +40,15 @@ def test_compare_strategies(symbol, timeframe="1h"):
     
     try:
         # Make request using query parameters
-        url = f"{BASE_URL}/strategies/compare-all"
-        params = {"symbol": symbol, "timeframe": timeframe}
-        
+        #url = f"{BASE_URL}/strategies/compare-all"
+        #params = {"symbol": symbol, "timeframe": timeframe}
+
         print(f"\n⏳ Searching for data and calculating indicators...")
-        response = requests.get(url, params=params)
-        response.raise_for_status()
-        
-        data = response.json()
-        
-        if not data.get("success"):
-            print("Error in API response")
-            return
-        
-        result = data["data"]
-        
+ 
+        strategy_service = StrategyService()
+        result = await strategy_service.compare_all_strategies(symbol, timeframe)
+
+ 
         # Mostrar informações básicas
         print(f"\n💰 Current Price: ${result['current_price']:,.2f}")
         print(f"⏰ Timestamp: {result['timestamp']}")
@@ -118,32 +110,13 @@ def test_compare_strategies(symbol, timeframe="1h"):
         print()
         print_strategy_result("Scalping", strategies["scalping"])
         print()
-        print_strategy_result("Trend Following", strategies["trend_following"])
-        print()
-        print_strategy_result("Reversal", strategies["reversal"])
-        print()
-        print_strategy_result("Hybrid", strategies["hybrid"])
-        if "score" in strategies["hybrid"]:
-            print(f"  {'':20}    Score: {strategies['hybrid']['score']}/10")
-        print()
-        
-        print_strategy_result("Advanced", strategies["advanced"])
-        if "indicators_used" in strategies["advanced"]:
-            print(f"  {'':20}    Indicators: {strategies['advanced']['indicators_used']}")
-        print()
-        
-        print_strategy_result("Intelligent", strategies["intelligent"])
-        if "external_data" in strategies["intelligent"]:
-            print(f"  {'':20}    External Data: {', '.join(strategies['intelligent']['external_data'])}")
-        if "analysis_sources" in strategies["intelligent"]:
-            print(f"  {'':20}    Analysis: {', '.join(strategies['intelligent']['analysis_sources'])}")
         
         # Show consensus
         print(f"\n📈 CONSENSUS:")
         consensus = result["consensus"]
-        print(f"  🟢 Buy:  {consensus['buy']}/7 strategies")
-        print(f"  🔴 Sell:   {consensus['sell']}/7 strategies")
-        print(f"  ⚪ Hold: {consensus['hold']}/7 strategies")
+        print(f"  🟢 Buy:  {consensus['buy']}/2 strategies")
+        print(f"  🔴 Sell:   {consensus['sell']}/2 strategies")
+        print(f"  ⚪ Hold: {consensus['hold']}/2 strategies")
         
         # Mostrar recomendação final
         print(f"\n💡 FINAL RECOMMENDATION:")
@@ -170,16 +143,19 @@ def test_compare_strategies(symbol, timeframe="1h"):
         print(f"❌ Error: {str(e)}")
 
 
-def test_multiple_symbols_and_timeframes():
+async def test_multiple_symbols_and_timeframes():
     """Test multiple symbols and timeframes"""
     print("\n" * 2)
     print_separator()
     print("🤖 TEST OF STRATEGIES COMPARISON - NeuraTrade")
     print_separator()
     
-    for symbol in SYMBOLS:
-        for timeframe in TIMEFRAMES:
-            test_compare_strategies(symbol, timeframe)
+    symbols = ["BTC/USDT", "ETH/USDT", "ADA/USDT"]
+    timeframes = ["1h", "4h"]
+    
+    for symbol in symbols:
+        for timeframe in timeframes:
+            await test_compare_strategies(symbol, timeframe)
             print("\n")
 
 
@@ -190,29 +166,29 @@ if __name__ == "__main__":
         # Se passou símbolo como argumento
         symbol = sys.argv[1]
         timeframe = sys.argv[2] if len(sys.argv) > 2 else "1h"
-        test_compare_strategies(symbol, timeframe)
+        asyncio.run(test_compare_strategies(symbol, timeframe))
     else:
         # Teste interativo
         print("STRATEGIES TEST - NeuraTrade")
         print("Options:")
         print("1. Test BTC/USDT (1h)")
         print("2. Test ETH/USDT (1h)")
-        print("3. Test all symbols and timeframes")
-        print("4. Customized")
+        #print("3. Test all symbols and timeframes")
+        #print("4. Customized")
         print()
         
-        choice = input("Choose an option (1-4): ").strip()
+        choice = input("Choose an option (1-2): ").strip()
         
         if choice == "1":
-            test_compare_strategies("BTC/USDT", "1h")
+            asyncio.run(test_compare_strategies("BTC/USDT", "1h"))
         elif choice == "2":
-            test_compare_strategies("ETH/USDT", "1h")
-        elif choice == "3":
-            test_multiple_symbols_and_timeframes()
-        elif choice == "4":
-            symbol = input("Enter the symbol (ex: BTC/USDT): ").strip()
-            timeframe = input("Enter the timeframe (ex: 1h, 4h, 1d): ").strip() or "1h"
-            test_compare_strategies(symbol, timeframe)
+            asyncio.run(test_compare_strategies("ETH/USDT", "1h"))
+        #elif choice == "3":
+        #    asyncio.run(test_multiple_symbols_and_timeframes())
+        #elif choice == "4":
+        #    symbol = input("Enter the symbol (ex: BTC/USDT): ").strip()
+        #    timeframe = input("Enter the timeframe (ex: 1h, 4h, 1d): ").strip() or "1h"
+        #    asyncio.run(test_compare_strategies(symbol, timeframe))
         else:
             print("Invalid option!")
 

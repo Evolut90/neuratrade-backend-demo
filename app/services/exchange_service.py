@@ -72,22 +72,22 @@ class ExchangeService:
             limit: Number of candles
         """
         try:
-            ohlcv_data = (
-                self.exchange.fetch_ohlcv(symbol, timeframe, limit=limit) 
-                if not self.use_mock_data 
-                else MockDataService.generate_ohlcv(symbol, timeframe, limit))
-                
-            candles = []
-            for candle_data in ohlcv_data:
-                candles.append(Candle(
-                    timestamp=datetime.fromtimestamp(candle_data[0] / 1000),
-                    open=Decimal(str(candle_data[1])),
-                    high=Decimal(str(candle_data[2])),
-                    low=Decimal(str(candle_data[3])),
-                    close=Decimal(str(candle_data[4])),
-                    volume=Decimal(str(candle_data[5]))
-                ))
-            
+            if self.use_mock_data:
+                # Mock data already returns Candle objects
+                return MockDataService.generate_ohlcv(symbol, timeframe, limit)
+            else:
+                # Real API data needs to be converted to Candle objects
+                ohlcv_data = self.exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
+                candles = []
+                for candle_data in ohlcv_data:
+                    candles.append(Candle(
+                        timestamp=datetime.fromtimestamp(candle_data[0] / 1000),
+                        open=Decimal(str(candle_data[1])),
+                        high=Decimal(str(candle_data[2])),
+                        low=Decimal(str(candle_data[3])),
+                        close=Decimal(str(candle_data[4])),
+                        volume=Decimal(str(candle_data[5]))
+                    ))
             return candles
         except Exception as e:
             raise Exception(f"Erro ao buscar OHLCV: {str(e)}")    
