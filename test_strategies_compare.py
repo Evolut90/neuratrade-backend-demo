@@ -48,91 +48,8 @@ async def test_compare_strategies(symbol, timeframe="1h"):
         strategy_service = StrategyService()
         result = await strategy_service.compare_all_strategies(symbol, timeframe)
 
+        print_formatted_result(result)
  
-        # Mostrar informações básicas
-        print(f"\n💰 Current Price: ${result['current_price']:,.2f}")
-        print(f"⏰ Timestamp: {result['timestamp']}")
-        
-        # Mostrar indicadores técnicos
-        print(f"\n📊 TECHNICAL INDICATORS:")
-        indicators = result["market_indicators"]
-        
-        # Basic Indicators
-        print(f"  📈 MOMENTUM:")
-        print(f"    RSI:        {indicators['rsi']:.2f} {'(Sobrevendido)' if indicators['rsi'] < 30 else '(Sobrecomprado)' if indicators['rsi'] > 70 else '(Neutro)'}")
-        if indicators.get('stoch_rsi_k'):
-            print(f"    Stoch RSI:  {indicators['stoch_rsi_k']:.2f} / {indicators['stoch_rsi_d']:.2f}")
-        if indicators.get('williams_r'):
-            print(f"    Williams %R: {indicators['williams_r']:.2f}")
-        
-        print(f"  📊 TREND:")
-        print(f"    MACD:       {indicators['macd']:.2f}")
-        print(f"    MACD Sinal: {indicators['macd_signal']:.2f}")
-        if indicators.get('adx'):
-            print(f"    ADX:        {indicators['adx']:.2f}")
-        if indicators.get('parabolic_sar'):
-            print(f"    Parabolic SAR: ${indicators['parabolic_sar']:,.2f}")
-        
-        print(f"  📉 MOVING AVERAGES:")
-        print(f"    EMA 20:     ${indicators['ema_20']:,.2f}")
-        print(f"    EMA 50:     ${indicators['ema_50']:,.2f}")
-        print(f"    SMA 200:    ${indicators['sma_200']:,.2f}")
-        
-        print(f"  📏 VOLATILITY:")
-        print(f"    Bollinger:")
-        print(f"      Upper: ${indicators['bb_upper']:,.2f}")
-        print(f"      Middle:    ${indicators['bb_middle']:,.2f}")
-        print(f"      Lower: ${indicators['bb_lower']:,.2f}")
-        if indicators.get('kc_upper'):
-            print(f"    Keltner:")
-            print(f"      Upper: ${indicators['kc_upper']:,.2f}")
-            print(f"      Middle:    ${indicators['kc_middle']:,.2f}")
-            print(f"      Lower: ${indicators['kc_lower']:,.2f}")
-        
-        print(f"  💰 VOLUME & FORCE:")
-        if indicators.get('mfi'):
-            print(f"    MFI:        {indicators['mfi']:.2f}")
-        if indicators.get('cci'):
-            print(f"    CCI:        {indicators['cci']:.2f}")
-        if indicators.get('atr'):
-            print(f"    ATR:        {indicators['atr']:.2f}")
-        
-        print(f"  🎯 DIRECTIONAL:")
-        if indicators.get('aroon_up') and indicators.get('aroon_down'):
-            print(f"    Aroon:      Up {indicators['aroon_up']:.2f} / Down {indicators['aroon_down']:.2f}")
-        
-        # Mostrar resultado de cada estratégia
-        print(f"\n🎯 RESULT OF STRATEGIES:")
-        print()
-        
-        strategies = result["strategies"]
-        print_strategy_result("Conservative", strategies["conservative"])
-        print()
-        print_strategy_result("Scalping", strategies["scalping"])
-        print()
-        
-        # Show consensus
-        print(f"\n📈 CONSENSUS:")
-        consensus = result["consensus"]
-        print(f"  🟢 Buy:  {consensus['buy']}/2 strategies")
-        print(f"  🔴 Sell:   {consensus['sell']}/2 strategies")
-        print(f"  ⚪ Hold: {consensus['hold']}/2 strategies")
-        
-        # Mostrar recomendação final
-        print(f"\n💡 FINAL RECOMMENDATION:")
-        final = result["final_recommendation"]
-        action_text = {
-            "buy": "🟢 BUY",
-            "sell": "🔴 SELL",
-            "hold": "⚪ HOLD"
-        }
-        
-        print(f"  Action:      {action_text.get(final['action'], final['action'])}")
-        print(f"  Confidence: {final['confidence'] * 100:.1f}%")
-        print(f"  Agreement:    {final['agreement']}")
-        
-        print_separator()
-        
     except requests.exceptions.ConnectionError:
         print("❌ Error: Unable to connect to the server.")
         print("   Ensure the server is running at http://localhost:8000")
@@ -159,16 +76,123 @@ async def test_multiple_symbols_and_timeframes():
             print("\n")
 
 
+def print_formatted_result(result):
+    """Format and display strategy results in an organized way"""
+    
+    print("\n📊 STRATEGY RESULTS")
+    print("=" * 60)
+    
+    # Basic information
+    print(f"💰 Symbol: {result.get('symbol', 'N/A')}")
+    print(f"⏰ Timeframe: {result.get('timeframe', 'N/A')}")
+    print(f"💵 Current Price: ${result.get('current_price', 0):,.2f}")
+    print(f"🕐 Timestamp: {result.get('timestamp', 'N/A')}")
+    
+    # Consensus
+    consensus = result.get('consensus', {})
+    print(f"\n🎯 CONSENSUS:")
+    print(f"   📈 Buy: {consensus.get('buy', 0)}")
+    print(f"   📉 Sell: {consensus.get('sell', 0)}")
+    print(f"   ⏸️  Hold: {consensus.get('hold', 0)}")
+    
+    # Final recommendation
+    final_rec = result.get('final_recommendation', {})
+    print(f"\n🏆 FINAL RECOMMENDATION:")
+    print(f"   Action: {final_rec.get('action', 'N/A').upper()}")
+    print(f"   Confidence: {final_rec.get('confidence', 0):.1%}")
+    print(f"   Agreement: {final_rec.get('agreement', 'N/A')}")
+    
+    # Individual strategies
+    strategies = result.get('strategies', {})
+    print(f"\n📋 INDIVIDUAL STRATEGIES:")
+    print("-" * 60)
+    
+    for name, strategy in strategies.items():
+        signal = strategy.get('signal', 'N/A')
+        confidence = strategy.get('confidence', 0)
+        description = strategy.get('description', 'N/A')
+        
+        # Emoji based on signal
+        emoji = "📈" if signal == "buy" else "📉" if signal == "sell" else "⏸️"
+        
+        print(f"\n{emoji} {name.upper()}:")
+        print(f"   Signal: {signal.upper()}")
+        print(f"   Confidence: {confidence:.1%}")
+        print(f"   Description: {description}")
+        
+        # Additional information if available
+        if 'score' in strategy:
+            print(f"   Score: {strategy['score']}")
+        if 'indicators_used' in strategy:
+            print(f"   Indicators: {strategy['indicators_used']}")
+        if 'external_data' in strategy:
+            print(f"   External Data: {', '.join(strategy['external_data'])}")
+    
+    # Market indicators
+    indicators = result.get('market_indicators', {})
+    print(f"\n📈 TECHNICAL INDICATORS:")
+    print("-" * 60)
+    
+    # Group indicators by category
+    basic_indicators = ['rsi', 'macd', 'macd_signal']
+    moving_averages = ['ema_20', 'ema_50', 'sma_200']
+    bollinger = ['bb_upper', 'bb_middle', 'bb_lower']
+    oscillators = ['stoch_rsi_k', 'stoch_rsi_d', 'williams_r', 'cci', 'mfi']
+    trend_indicators = ['adx', 'atr', 'parabolic_sar']
+    
+    print("\n🔵 Basic Indicators:")
+    for indicator in basic_indicators:
+        value = indicators.get(indicator)
+        if value is not None:
+            print(f"   {indicator.upper()}: {value}")
+    
+    print("\n📊 Moving Averages:")
+    for indicator in moving_averages:
+        value = indicators.get(indicator)
+        if value is not None:
+            print(f"   {indicator.upper()}: {value}")
+    
+    print("\n🎯 Bollinger Bands:")
+    for indicator in bollinger:
+        value = indicators.get(indicator)
+        if value is not None:
+            print(f"   {indicator.upper()}: {value}")
+    
+    print("\n🔄 Oscillators:")
+    for indicator in oscillators:
+        value = indicators.get(indicator)
+        if value is not None:
+            print(f"   {indicator.upper()}: {value}")
+    
+    print("\n📈 Trend Indicators:")
+    for indicator in trend_indicators:
+        value = indicators.get(indicator)
+        if value is not None:
+            print(f"   {indicator.upper()}: {value}")
+    
+    # Candlestick patterns
+    patterns = indicators.get('candlestick_patterns')
+    if patterns:
+        print(f"\n🕯️ CANDLESTICK PATTERNS:")
+        print("-" * 60)
+        for pattern, value in patterns.items():
+            status = "✅" if value else "❌"
+            print(f"   {status} {pattern}: {value}")
+    
+    print("\n" + "=" * 60)
+    print("✅ Test completed successfully!")            
+
+
 if __name__ == "__main__":
     import sys
     
     if len(sys.argv) > 1:
-        # Se passou símbolo como argumento
+        # If symbol passed as argument
         symbol = sys.argv[1]
         timeframe = sys.argv[2] if len(sys.argv) > 2 else "1h"
         asyncio.run(test_compare_strategies(symbol, timeframe))
     else:
-        # Teste interativo
+        # Interactive test
         print("STRATEGIES TEST - NeuraTrade")
         print("Options:")
         print("1. Test BTC/USDT (1h)")

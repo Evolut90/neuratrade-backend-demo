@@ -160,8 +160,34 @@ class StrategyService:
         }
         
         # 3. Trend Following Strategy  
+        signal, confidence = self.trend_following_strategy(indicators, current_price)
+        results["trend_following"] = {
+            "signal": signal,
+            "confidence": round(confidence, 3),
+            "description": "Follows medium-term trends"
+        }        
+
         # 4. Reversal Strategy  
+        signal, confidence = self.reversal_strategy(indicators, current_price)
+        results["reversal"] = {
+            "signal": signal,
+            "confidence": round(confidence, 3),
+            "description": "Seeks reversal points"
+        }
+
         # 5. Hybrid Strategy  
+        signal, confidence, score = self.hybrid_intelligent_strategy(
+            indicators, current_price, candles
+        )
+        results["hybrid"] = {
+            "signal": signal,
+            "confidence": round(confidence, 3),
+            "score": score,
+            "description": "Combines all indicators (weighted)"
+        }
+
+
+
         # 6. Advanced Multi-Indicator Strategy 
         # 7. Intelligent Strategy (with external data)
   
@@ -328,6 +354,182 @@ class StrategyService:
         else:
             return "hold", 0.5
 
+    def reversal_strategy(self,indicators, current_price):
+        """
+        Seeks trend reversal points
+        """
+        signal = "hold"
+        confidence = 0.5
+        
+        # REVERSAL UP: Multiple bottom signals
+        extreme_oversold = indicators.rsi < 25
+        touching_lower_band = current_price <= float(indicators.bb_lower)
+        macd_turning_up = (indicators.macd_histogram > 0 and 
+                        indicators.macd < 0)  # Negative MACD but rising
+        
+        if extreme_oversold and touching_lower_band:
+            signal = "buy"
+            confidence = 0.75
+            
+            if macd_turning_up:
+                confidence = 0.90  # Very likely reversal
+        
+        # REVERSAL DOWN: Multiple top signals
+        extreme_overbought = indicators.rsi > 75
+        touching_upper_band = current_price >= float(indicators.bb_upper)
+        macd_turning_down = (indicators.macd_histogram < 0 and 
+                            indicators.macd > 0)  # Positive MACD but falling
+        
+        if extreme_overbought and touching_upper_band:
+            signal = "sell"
+            confidence = 0.75
+            
+            if macd_turning_down:
+                confidence = 0.90
+        
+        return signal, confidence
+
+    def trend_following_strategy(self,indicators, current_price):
+        """
+        Buys uptrends, sells downtrends
+        """
+        signal = "hold"
+        confidence = 0.5
+        
+        # Check moving average alignment (clear trend)
+        uptrend = (indicators.ema_20 > indicators.ema_50 > indicators.sma_200)
+        downtrend = (indicators.ema_20 < indicators.ema_50 < indicators.sma_200)
+        
+        # BUY: Uptrend + RSI not overbought
+        if uptrend and indicators.rsi < 65:
+            signal = "buy"
+            
+            # Confidence increases if:
+            # - MACD positive
+            # - Price above all moving averages
+            conf_boost = 0
+            if indicators.macd > indicators.macd_signal:
+                conf_boost += 0.15
+            if current_price > float(indicators.ema_20):
+                conf_boost += 0.15
+            
+            confidence = 0.70 + conf_boost
+        
+        # SELL: Downtrend + RSI not oversold
+        elif downtrend and indicators.rsi > 35:
+            signal = "sell"
+            
+            conf_boost = 0
+            if indicators.macd < indicators.macd_signal:
+                conf_boost += 0.15
+            if current_price < float(indicators.ema_20):
+                conf_boost += 0.15
+            
+            confidence = 0.70 + conf_boost
+        
+        # HOLD: Mixed moving averages (no clear trend)
+        else:
+            signal = "hold"
+            confidence = 0.3  # Low confidence = wait
+        
+        return signal, confidence           
+
+
+    # methods for different strategies
+    def hybrid_intelligent_strategy(self,indicators, current_price, candles):
+        """
+        Hybrid strategy that analyzes all indicators
+        and adjusts weight based on market context
+        """
+        score = 0
+        max_score = 10
+        
+        # === TREND ANALYSIS (weight: 3) ===
+        trend_score = 0
+        
+        if indicators.ema_20 > indicators.ema_50:
+            trend_score += 1
+        else:
+            trend_score -= 1
+        
+        if indicators.ema_50 and indicators.sma_200:
+            if indicators.ema_50 > indicators.sma_200:
+                trend_score += 1
+            else:
+                trend_score -= 1
+        
+        if current_price > float(indicators.sma_200):
+            trend_score += 1
+        else:
+            trend_score -= 1
+        
+        score += trend_score
+        
+        # === MOMENTUM ANALYSIS (weight: 3) ===
+        momentum_score = 0
+        
+        # RSI
+        if indicators.rsi < 30:
+            momentum_score += 2
+        elif indicators.rsi < 40:
+            momentum_score += 1
+        elif indicators.rsi > 70:
+            momentum_score -= 2
+        elif indicators.rsi > 60:
+            momentum_score -= 1
+        
+        # MACD
+        if indicators.macd > indicators.macd_signal:
+            momentum_score += 1
+        else:
+            momentum_score -= 1
+        
+        score += momentum_score
+        
+        # === VOLATILITY ANALYSIS (weight: 2) ===
+        volatility_score = 0
+        
+        bb_position = (current_price - float(indicators.bb_lower)) / (float(indicators.bb_upper) - float(indicators.bb_lower))
+        
+        if bb_position < 0.2:  # Near lower band
+            volatility_score += 2
+        elif bb_position < 0.4:
+            volatility_score += 1
+        elif bb_position > 0.8:  # Near upper band
+            volatility_score -= 2
+        elif bb_position > 0.6:
+            volatility_score -= 1
+        
+        score += volatility_score
+        
+        # === MOVEMENT STRENGTH ANALYSIS (weight: 2) ===
+        # Check if price is accelerating
+        recent_closes = [float(c.close) for c in candles[-5:]]
+        price_momentum = (recent_closes[-1] - recent_closes[0]) / recent_closes[0]
+        
+        if price_momentum > 0.02:  # Rising more than 2%
+            score += 1
+        elif price_momentum < -0.02:  # Falling more than 2%
+            score -= 1
+        
+        # MACD histogram growing
+        if indicators.macd_histogram > 0:
+            score += 1
+        else:
+            score -= 1
+        
+        # === FINAL DECISION ===
+        if score >= 5:
+            signal = "buy"
+            confidence = min(1.0, 0.5 + (score / max_score) * 0.5)
+        elif score <= -5:
+            signal = "sell"
+            confidence = min(1.0, 0.5 + (abs(score) / max_score) * 0.5)
+        else:
+            signal = "hold"
+            confidence = 0.3 + (abs(score) / max_score) * 0.2
+        
+        return signal, confidence, score
 
 
  
